@@ -1,0 +1,67 @@
+name: Build macOS
+
+on:
+  push:
+    branches: ["mac-build"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+
+jobs:
+  macos:
+    name: macOS universal (app + dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build universal app + dmg
+        run: pnpm tauri build --target universal-apple-darwin
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg artifacts/
+          ditto -c -k --keepParent "src-tauri/target/universal-apple-darwin/release/bundle/macos/HGhub.app" "artifacts/HGhub_universal.app.zip"
+          ls -lh artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: artifacts/*
+          if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mac-v1.1.0
+          name: HGhub 1.1.0 for macOS (universal, self-built)
+          body: "Built from the official HGhub source on GitHub Actions (macOS runner). Universal binary for Intel and Apple Silicon Macs. Unsigned app: on first launch, right-click the app icon and choose Open."
+          files: artifacts/*
+          fail_on_unmatched_files: true
